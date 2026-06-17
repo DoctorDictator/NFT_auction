@@ -1,4 +1,4 @@
-# BlockchainExpert - NFT Auction
+# NFT Auction
 
 This project provides a ERC721 smart contract that allows you to mint unique NFTs. It also provides an auction contract that allows users to auction of their NFTs.
 
