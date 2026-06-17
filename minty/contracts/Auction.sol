@@ -1,152 +1,195 @@
-pragma solidity ^0.7.0;
+// SPDX-License-Identifier: MIT
+pragma solidity ^0.8.20;
 
 import "@openzeppelin/contracts/token/ERC721/IERC721.sol";
-import "@openzeppelin/contracts/token/ERC721/IERC721Receiver.sol";
+import "@openzeppelin/contracts/token/ERC721/utils/ERC721Holder.sol";
+import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 
-contract Auction {
+contract Auction is ERC721Holder, ReentrancyGuard {
+    enum ListingStatus { Active, Ended, Canceled }
+
     struct Listing {
+        address seller;
         IERC721 nft;
-        uint256 nftId;
-        uint256 minPrice;
-        uint256 highestBid;
+        uint256 tokenId;
+        uint96 minPriceWei;
+        uint96 highestBid;
         address highestBidder;
-        uint256 endTime;
-        address owner;
+        uint40 endTime;
+        ListingStatus status;
     }
 
-    uint256 nextListingId;
-    mapping(uint256 => Listing) listings;
-    mapping(address => uint256) balances;
+    uint256 public listingCount;
+    mapping(uint256 => Listing) private _listings;
+    mapping(address => uint256) public pendingWithdrawals;
 
-    event List(
-        address indexed lister,
+    uint256 public constant MIN_BID_INCREMENT_PERCENT = 5;
+    uint256 public constant EXTENSION_PERIOD = 15 minutes;
+    uint256 public constant MAX_DURATION = 14 days;
+
+    event Listed(
+        address indexed seller,
         address indexed nft,
-        uint256 indexed nftId,
+        uint256 indexed tokenId,
         uint256 listingId,
-        uint256 minPrice,
-        uint256 endTime,
-        uint256 timestamp
+        uint256 minPriceWei,
+        uint256 endTime
     );
-    event Bid(
+
+    event BidPlaced(
         address indexed bidder,
         uint256 indexed listingId,
-        uint256 amount,
-        uint256 timestamp
+        uint256 amount
+    );
+
+    event AuctionExtended(
+        uint256 indexed listingId,
+        uint256 newEndTime
+    );
+
+    event AuctionCanceled(
+        uint256 indexed listingId
+    );
+
+    event AuctionEnded(
+        uint256 indexed listingId,
+        address winner,
+        uint256 winningBid
+    );
+
+    event FundsWithdrawn(
+        address indexed account,
+        uint256 amount
     );
 
     modifier listingExists(uint256 listingId) {
-        require(
-            listings[listingId].owner != address(0),
-            "listing does not exist"
-        );
+        require(listingId < listingCount, "listing does not exist");
         _;
-    }
-
-    function onERC721Received(
-        address operator,
-        address from,
-        uint256 tokenId,
-        bytes calldata data
-    ) public returns (bytes4) {
-        return IERC721Receiver.onERC721Received.selector;
     }
 
     function list(
         address nft,
-        uint256 nftId,
-        uint256 minPrice,
-        uint256 numHours
-    ) external {
+        uint256 tokenId,
+        uint256 minPriceWei,
+        uint64 durationSeconds
+    ) external returns (uint256) {
+        require(minPriceWei > 0, "min price must be > 0");
+        require(durationSeconds > 0, "duration must be > 0");
+        require(durationSeconds <= MAX_DURATION, "duration too long");
+
         IERC721 nftContract = IERC721(nft);
+        require(nftContract.ownerOf(tokenId) == msg.sender, "not owner");
         require(
-            nftContract.ownerOf(nftId) == msg.sender,
-            "you do not own this nft"
-        );
-        require(
-            nftContract.getApproved(nftId) == address(this),
-            "this contract is not approved to access this nft"
+            nftContract.getApproved(tokenId) == address(this) ||
+            nftContract.isApprovedForAll(msg.sender, address(this)),
+            "not approved"
         );
 
-        nftContract.safeTransferFrom(msg.sender, address(this), nftId);
+        nftContract.safeTransferFrom(msg.sender, address(this), tokenId);
 
-        Listing storage listing = listings[nextListingId];
-        listing.nft = nftContract;
-        listing.nftId = nftId;
-        listing.minPrice = minPrice;
-        listing.endTime = block.timestamp + (numHours * 1 hours);
-        listing.owner = msg.sender;
-        listing.highestBidder = msg.sender;
+        uint256 id = listingCount;
+        Listing storage l = _listings[id];
+        l.seller = msg.sender;
+        l.nft = nftContract;
+        l.tokenId = tokenId;
+        l.minPriceWei = uint96(minPriceWei);
+        l.endTime = uint40(block.timestamp + durationSeconds);
+        l.status = ListingStatus.Active;
 
-        emit List(
-            msg.sender,
-            nft,
-            nftId,
-            nextListingId,
-            minPrice,
-            listing.endTime,
-            block.timestamp
-        );
+        listingCount++;
 
-        nextListingId++;
+        emit Listed(msg.sender, nft, tokenId, id, minPriceWei, l.endTime);
+
+        return id;
     }
 
-    function bid(uint256 listingId) external payable listingExists(listingId) {
-        Listing storage listing = listings[listingId];
-        require(
-            msg.value >= listing.minPrice,
-            "you must bid at least the min price"
-        );
-        require(
-            msg.value > listing.highestBid,
-            "you must bid higher than the current highest bid"
-        );
-        require(block.timestamp < listing.endTime, "auction is over");
+    function bid(uint256 listingId) external payable nonReentrant listingExists(listingId) {
+        Listing storage l = _listings[listingId];
+        require(l.status == ListingStatus.Active, "auction not active");
+        require(block.timestamp < l.endTime, "auction ended");
+        require(msg.value >= l.minPriceWei, "below min price");
 
-        balances[listing.highestBidder] += listing.highestBid;
-        listing.highestBid = msg.value;
-        listing.highestBidder = msg.sender;
+        uint96 minBid = l.highestBid;
+        if (minBid == 0) {
+            minBid = l.minPriceWei;
+        } else {
+            minBid = uint96((uint256(minBid) * (100 + MIN_BID_INCREMENT_PERCENT)) / 100);
+        }
+        require(msg.value >= minBid, "bid too low");
 
-        emit Bid(msg.sender, listingId, msg.value, block.timestamp);
+        if (l.highestBidder != address(0)) {
+            pendingWithdrawals[l.highestBidder] += l.highestBid;
+        }
+
+        l.highestBid = uint96(msg.value);
+        l.highestBidder = msg.sender;
+
+        if (l.endTime - block.timestamp < EXTENSION_PERIOD) {
+            l.endTime = uint40(block.timestamp + EXTENSION_PERIOD);
+            emit AuctionExtended(listingId, l.endTime);
+        }
+
+        emit BidPlaced(msg.sender, listingId, msg.value);
     }
 
-    function end(uint256 listingId) external listingExists(listingId) {
-        Listing storage listing = listings[listingId];
-        require(block.timestamp > listing.endTime, "auction is not over");
+    function cancel(uint256 listingId) external listingExists(listingId) {
+        Listing storage l = _listings[listingId];
+        require(l.seller == msg.sender, "not seller");
+        require(l.status == ListingStatus.Active, "not active");
+        require(l.highestBidder == address(0) && l.highestBid == 0, "bids placed");
 
-        balances[listing.owner] += listing.highestBid;
-        listing.nft.safeTransferFrom(
-            address(this),
-            listing.highestBidder,
-            listing.nftId
-        );
-        delete listings[listingId];
+        l.status = ListingStatus.Canceled;
+        l.nft.safeTransferFrom(address(this), msg.sender, l.tokenId);
+
+        emit AuctionCanceled(listingId);
     }
 
-    function withdrawFunds() external {
-        uint256 balance = balances[msg.sender];
-        balances[msg.sender] = 0;
-        (bool sent, ) = payable(msg.sender).call{value: balance}("");
-        require(sent);
+    function end(uint256 listingId) external nonReentrant listingExists(listingId) {
+        Listing storage l = _listings[listingId];
+        require(l.status == ListingStatus.Active, "not active");
+        require(block.timestamp >= l.endTime, "auction still active");
+
+        l.status = ListingStatus.Ended;
+
+        if (l.highestBidder == address(0)) {
+            l.nft.safeTransferFrom(address(this), l.seller, l.tokenId);
+            emit AuctionEnded(listingId, address(0), 0);
+        } else {
+            pendingWithdrawals[l.seller] += l.highestBid;
+            l.nft.safeTransferFrom(address(this), l.highestBidder, l.tokenId);
+            emit AuctionEnded(listingId, l.highestBidder, l.highestBid);
+        }
     }
 
-    function getListing(uint256 listingId)
-        public
-        view
-        listingExists(listingId)
-        returns (
-            address,
-            uint256,
-            uint256,
-            uint256,
-            uint256
-        )
-    {
+    function withdraw() external nonReentrant {
+        uint256 amount = pendingWithdrawals[msg.sender];
+        require(amount > 0, "nothing to withdraw");
+        pendingWithdrawals[msg.sender] = 0;
+        (bool sent, ) = payable(msg.sender).call{value: amount}("");
+        require(sent, "transfer failed");
+        emit FundsWithdrawn(msg.sender, amount);
+    }
+
+    function getListing(uint256 listingId) external view listingExists(listingId) returns (
+        address seller,
+        address nft,
+        uint256 tokenId,
+        uint256 minPriceWei,
+        uint256 highestBid,
+        address highestBidder,
+        uint256 endTime,
+        ListingStatus status
+    ) {
+        Listing storage l = _listings[listingId];
         return (
-            address(listings[listingId].nft),
-            listings[listingId].nftId,
-            listings[listingId].highestBid,
-            listings[listingId].minPrice,
-            listings[listingId].endTime
+            l.seller,
+            address(l.nft),
+            l.tokenId,
+            l.minPriceWei,
+            l.highestBid,
+            l.highestBidder,
+            l.endTime,
+            l.status
         );
     }
 }

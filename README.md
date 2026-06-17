@@ -1,31 +1,83 @@
-# BlockchainExpert - NFT Auction
+# NFT Auction
 
-This project provides a ERC721 smart contract that allows you to mint unique NFTs. It also provides an auction contract that allows users to auction of their NFTs.
+A portfolio-grade NFT auction platform with Solidity smart contracts and a React frontend. Supports native ETH auctions with anti-sniping time extensions, minimum bid increments, and pull-based refunds.
 
-## Getting Started
+## Stack
 
-To deploy the smart contract follow the steps below.
+- **Contracts**: Solidity 0.8.20, OpenZeppelin 5.x
+- **Framework**: Hardhat, ethers v6
+- **Frontend**: Vite + React 18, ethers v6
+- **Testing**: Hardhat test, chai, hardhat-chai-matchers
 
-1. Install [Node.js](https://nodejs.org/en/download/)
-2. Clone the repository: `git clone https://github.com/algoexpert-io/NFT-Auction.git`
-3. `cd NFT-Auction/minty`
-4. `npm link`
-5. `npm install`
-6. Install [IPFS Command Line](https://docs.ipfs.tech/install/command-line/#official-distributions)
-7. `ipfs daemon`
-8. In a new terimal window `npx hardhat node`
-9. Run `minty deploy`
+## Quick Start
 
-## Minting Tokens
+```bash
+# Install contract dependencies
+cd minty
+npm install
 
-Once the smart contract is deployed and IPFS is running you can mint new NFTs by running the following command.
+# Start a local Hardhat node
+npx hardhat node
 
-- `minty mint ./asset-path --name "Name" --description "description"`
+# In another terminal, deploy contracts
+npx hardhat run --network localhost scripts/deploy.js
 
-## Using the Frontend
+# Run tests
+npm test
+```
 
-1. Install the [Liveserver Extension](https://marketplace.visualstudio.com/items?itemName=ritwickdey.LiveServer) in VSCode.
-2. Open [base.html](frontend/base.html)
-3. Click the button that says "Go Live" in the bottom right hand corner of your VSCode.
-4. Import any accounts you need into MetaMask and change your MetaMask network to "Hardhat".
-5. Interact with the contract!
+## Frontend
+
+```bash
+# Install frontend dependencies
+cd frontend
+npm install
+
+# Copy deployment artifact so the frontend can find contracts
+cp ../minty/deployment.json public/
+
+# Start dev server
+npm run dev
+```
+
+Set `VITE_MINTY_ADDRESS` and `VITE_AUCTION_ADDRESS` environment variables if not using the deployment artifact.
+
+## CLI (Minting)
+
+```bash
+# Link the CLI globally
+cd minty
+npm link
+
+# Mint a new NFT
+minty mint ./asset-path --name "Name" --description "Description"
+
+# Show token info
+minty show <token-id>
+
+# Transfer a token
+minty transfer <token-id> <to-address>
+```
+
+## Contracts
+
+### Auction
+- `list(nft, tokenId, minPriceWei, durationSeconds)` — Create an active listing after approval
+- `bid(listingId)` — Place a bid (payable); enforces min price, 5% bid increment, and auction deadline
+- `cancel(listingId)` — Cancel a listing; seller only, only before any bid
+- `end(listingId)` — Finalize ended auction; sends NFT to winner (or back to seller if no bids)
+- `withdraw()` — Pull-based refund/claim for outbid bidders and sellers
+- Anti-sniping: a bid in the last 15 minutes extends the deadline by 15 minutes
+- Max auction duration: 14 days
+
+### Minty
+- ERC721 with `MINTER_ROLE`-restricted minting
+- Stores full `ipfs://...` URIs per token
+- Deployer receives `DEFAULT_ADMIN_ROLE` and `MINTER_ROLE`
+
+## Test
+
+```bash
+cd minty
+npm test
+```

@@ -11,7 +11,7 @@ const chalk = require('chalk')
 const colorize = require('json-colorizer')
 const config = require('getconfig')
 const {MakeMinty} = require('./minty')
-const {deployContract, saveDeploymentInfo} = require('./deploy')
+const {deployContracts, saveDeploymentInfo} = require('./deploy')
 
 const colorizeOptions = {
     pretty: true,
@@ -133,7 +133,7 @@ async function pinNFTData(tokenId) {
 
 async function deploy(options) {
     const filename = options.output
-    const info = await deployContract(options.name, options.symbol)
+    const info = await deployContracts(options.name, options.symbol)
     await saveDeploymentInfo(info, filename)
 }
 
