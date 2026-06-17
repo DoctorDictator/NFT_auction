@@ -14,32 +14,40 @@ const MintyABI = [
   "event Approval(address indexed owner, address indexed approved, uint256 indexed tokenId)",
 ];
 
-const AuctionABI = [
-  "function list(address nft, uint256 tokenId, uint256 minPriceWei, uint64 durationSeconds) returns (uint256)",
+const MarketplaceABI = [
+  "function listAuction(address nft, uint256 tokenId, uint256 minPriceWei, uint256 reservePriceWei, uint256 buyNowPriceWei, uint64 durationSeconds) returns (uint256)",
+  "function listFixedPrice(address nft, uint256 tokenId, uint256 priceWei) returns (uint256)",
   "function bid(uint256 listingId) payable",
+  "function buyNow(uint256 listingId) payable",
+  "function buyFixedPrice(uint256 listingId) payable",
   "function cancel(uint256 listingId)",
   "function end(uint256 listingId)",
+  "function reducePrice(uint256 listingId, uint256 newPriceWei)",
   "function withdraw()",
-  "function getListing(uint256 listingId) view returns (address seller, address nft, uint256 tokenId, uint256 minPriceWei, uint256 highestBid, address highestBidder, uint256 endTime, uint8 status)",
+  "function getListing(uint256 listingId) view returns (address seller, address nft, uint256 tokenId, uint256 listingType, uint256 status, uint256 minPriceWei, uint256 reservePriceWei, uint256 buyNowPriceWei, uint256 highestBid, address highestBidder, uint256 endTime)",
   "function listingCount() view returns (uint256)",
   "function pendingWithdrawals(address) view returns (uint256)",
-  "function MIN_BID_INCREMENT_PERCENT() view returns (uint256)",
-  "event Listed(address indexed seller, address indexed nft, uint256 indexed tokenId, uint256 listingId, uint256 minPriceWei, uint256 endTime)",
+  "function platformFeeBps() view returns (uint256)",
+  "function treasury() view returns (address)",
+  "function getAuctionHistory(uint256) view returns (uint256 listingId, address nft, uint256 tokenId, address winner, uint256 winningBid, address seller, uint256 endTime)",
+  "function getAuctionHistoryCount() view returns (uint256)",
+  "function getActiveListingIds(uint256 offset, uint256 limit) view returns (uint256[])",
+  "function getListingsBySeller(address seller, uint256 offset, uint256 limit) view returns (uint256[])",
+  "event AuctionListed(address indexed seller, address indexed nft, uint256 indexed tokenId, uint256 listingId, uint256 minPriceWei, uint256 reservePriceWei, uint256 buyNowPriceWei, uint256 endTime)",
+  "event FixedPriceListed(address indexed seller, address indexed nft, uint256 indexed tokenId, uint256 listingId, uint256 priceWei)",
   "event BidPlaced(address indexed bidder, uint256 indexed listingId, uint256 amount)",
+  "event BuyNowPurchased(address indexed buyer, uint256 indexed listingId, uint256 amount)",
   "event AuctionExtended(uint256 indexed listingId, uint256 newEndTime)",
-  "event AuctionCanceled(uint256 indexed listingId)",
-  "event AuctionEnded(uint256 indexed listingId, address winner, uint256 winningBid)",
+  "event ListingCanceled(address indexed caller, uint256 indexed listingId)",
+  "event AuctionEnded(uint256 indexed listingId, address winner, uint256 winningBid, bool reserveMet)",
+  "event FixedPriceSold(address indexed buyer, uint256 indexed listingId, uint256 priceWei)",
   "event FundsWithdrawn(address indexed account, uint256 amount)",
 ];
 
 let cachedDeployment = null;
 
 function isAddress(addr) {
-  try {
-    return ethers.isAddress(addr);
-  } catch {
-    return false;
-  }
+  try { return ethers.isAddress(addr); } catch { return false; }
 }
 
 export async function getContractAddresses() {
@@ -49,25 +57,17 @@ export async function getContractAddresses() {
     const resp = await fetch("/deployment.json");
     if (resp.ok) {
       const data = await resp.json();
-      if (
-        data.contracts?.Minty?.address &&
-        data.contracts?.Auction?.address
-      ) {
-        cachedDeployment = {
-          Minty: data.contracts.Minty.address,
-          Auction: data.contracts.Auction.address,
-        };
+      if (data.contracts?.Minty?.address && data.contracts?.Marketplace?.address) {
+        cachedDeployment = { Minty: data.contracts.Minty.address, Marketplace: data.contracts.Marketplace.address };
         return cachedDeployment;
       }
     }
-  } catch {
-    // fetch failed, fall through
-  }
+  } catch {}
 
   const envMinty = import.meta.env.VITE_MINTY_ADDRESS;
-  const envAuction = import.meta.env.VITE_AUCTION_ADDRESS;
-  if (envMinty && envAuction && isAddress(envMinty) && isAddress(envAuction)) {
-    cachedDeployment = { Minty: envMinty, Auction: envAuction };
+  const envMarketplace = import.meta.env.VITE_MARKETPLACE_ADDRESS;
+  if (envMinty && envMarketplace && isAddress(envMinty) && isAddress(envMarketplace)) {
+    cachedDeployment = { Minty: envMinty, Marketplace: envMarketplace };
     return cachedDeployment;
   }
 
@@ -80,10 +80,10 @@ export function getMintyContract(signerOrProvider) {
   return new ethers.Contract(addr, MintyABI, signerOrProvider);
 }
 
-export function getAuctionContract(signerOrProvider) {
-  const addr = cachedDeployment?.Auction;
+export function getMarketplaceContract(signerOrProvider) {
+  const addr = cachedDeployment?.Marketplace;
   if (!addr) return null;
-  return new ethers.Contract(addr, AuctionABI, signerOrProvider);
+  return new ethers.Contract(addr, MarketplaceABI, signerOrProvider);
 }
 
-export { MintyABI, AuctionABI };
+export { MintyABI, MarketplaceABI };

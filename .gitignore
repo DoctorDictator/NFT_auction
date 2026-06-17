@@ -1,0 +1,53 @@
+node_modules/
+**/node_modules/
+
+# Build output
+dist/
+build/
+coverage/
+.nyc_output/
+
+# Vite
+.vite/
+*.local
+
+# Hardhat
+cache/
+artifacts/
+typechain/
+typechain-types/
+deployments/
+ignition/deployments/
+minty-deployment.json
+
+# Environment and secrets
+.env
+.env.*
+!.env.example
+*.env
+!*.env.example
+config/*.env
+!config/*.env.example
+minty/config/*.env
+!minty/config/*.env.example
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Package manager caches
+.npm/
+.yarn/
+.pnpm-store/
+
+# Editors and OS files
+.idea/
+.vscode/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db

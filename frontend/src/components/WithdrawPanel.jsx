@@ -11,15 +11,11 @@ export default function WithdrawPanel({ balance, onWithdraw, loading }) {
         <p className="withdraw-balance">
           Available: <strong>{ethers.formatEther(balWei)} ETH</strong>
         </p>
-        <button
-          className="btn btn-primary"
-          onClick={onWithdraw}
-          disabled={loading || !hasBalance}
-        >
+        <button className="btn btn-primary" onClick={onWithdraw} disabled={loading || !hasBalance}>
           {loading ? "Withdrawing..." : "Withdraw"}
         </button>
         {!hasBalance && (
-          <p className="hint">No funds to withdraw. Outbid bidders and sellers after auction end receive funds here.</p>
+          <p className="hint">No funds to withdraw. Outbid bidders and sellers after sale receive funds here.</p>
         )}
       </div>
     </div>
